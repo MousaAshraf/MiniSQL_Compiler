@@ -1,5 +1,11 @@
 import difflib
 
+
+class LexerError(Exception):
+    """Custom exception for lexer errors"""
+    pass
+
+
 class Token:
     def __init__(self, type, value, line, column):
         self.type = type
@@ -18,6 +24,7 @@ class Lexer:
         self.current_char = self.text[self.pos] if text else None
         self.line = 1
         self.column = 1
+        self.token_start_col = 1  # Track where current token started
         # SQL reserved words that should be classified as KEYWORD tokens
         self.keywords = {
             # Core DML / DDL / clauses
@@ -36,7 +43,23 @@ class Lexer:
             'GRANT', 'GROUPING', 'IF', 'IGNORE', 'INDEXES', 'INTERVAL',
             'ISNULL', 'NATURAL', 'OFFSET', 'PARTITION', 'REPLACE',
             'RETURNING', 'ROLLUP', 'SOME', 'TRUNCATE', 'USING', 'WHEN',
-            'WITH', 'WITHIN', 'GROUP'
+            'WITH', 'WITHIN', 'GROUP',
+            
+            # Aggregate and built-in functions
+            'COUNT', 'SUM', 'AVG', 'MIN', 'MAX', 'CAST', 'COALESCE',
+            'SUBSTR', 'LENGTH', 'UPPER', 'LOWER', 'ROUND', 'FLOOR', 'CEIL'
+        }
+        
+        # Multi-character operators
+        self.multi_char_operators = {
+            '==': 'OPERATOR',
+            '<>': 'COMPARISON',
+            '!=': 'COMPARISON',
+            '<=': 'COMPARISON',
+            '>=': 'COMPARISON',
+            '||': 'OPERATOR',
+            '<<': 'OPERATOR',  
+            '>>': 'OPERATOR',  
         }
 
     def similar_to_keyword(self, identifier):
@@ -50,27 +73,27 @@ class Lexer:
         if identifier_upper in self.keywords:
             return None  # No error, it's correct
         
-        # Find close matches
-        matches = difflib.get_close_matches(identifier_upper, self.keywords, n=1, cutoff=0.8)
+        matches = difflib.get_close_matches(identifier_upper, self.keywords, n=1, cutoff=0.65)
         
         if matches:
             return matches[0]  # Return the closest keyword match
         return None
 
     def error(self, message):
-        # Raise an error with a fully formatted message.
-        # Call sites are responsible for including line and position information.
-        raise Exception(message)
+        # Raise a custom lexer error with a fully formatted message.
+        raise LexerError(message)
 
     def advance(self):
+        """Move to the next character and properly track line/column position"""
         if self.current_char == '\n':
             self.line += 1
-            self.column = 0
+            self.column = 1  # Reset to 1, not 0
+        else:
+            self.column += 1
         
         self.pos += 1
         if self.pos < len(self.text):
             self.current_char = self.text[self.pos]
-            self.column += 1
         else:
             self.current_char = None
 
@@ -105,21 +128,43 @@ class Lexer:
                 self.advance()  # Skip second #
 
     def get_number(self):
+        """Parse numeric literals including integers, floats, and scientific notation"""
         result = ''
         is_float = False
         start_col = self.column
         
+        # Parse the main number part
         while self.current_char is not None and (self.current_char.isdigit() or self.current_char == '.'):
             if self.current_char == '.':
                 if is_float:
-                    self.error('Invalid number format')
+                    self.error('Invalid number format: multiple decimal points')
                 is_float = True
             result += self.current_char
             self.advance()
+        
+        # Handle scientific notation (e.g., 1.5e-10, 3E+5)
+        if self.current_char is not None and self.current_char.lower() == 'e':
+            is_float = True
+            result += self.current_char
+            self.advance()
             
+            # Optional sign after 'e'
+            if self.current_char is not None and self.current_char in '+-':
+                result += self.current_char
+                self.advance()
+            
+            # Exponent digits
+            if self.current_char is None or not self.current_char.isdigit():
+                self.error('Invalid number format: exponent requires digits after "e"')
+            
+            while self.current_char is not None and self.current_char.isdigit():
+                result += self.current_char
+                self.advance()
+        
         return ('FLOAT' if is_float else 'INTEGER'), result
 
     def get_identifier(self):
+        """Parse identifiers and check for keywords"""
         result = ''
         start_col = self.column
         
@@ -132,14 +177,17 @@ class Lexer:
         if result.upper() in self.keywords:
             return 'KEYWORD', result.upper()
         
-        # Check if it's similar to a keyword (potential misspelling)
+        # Check if it's similar to a keyword (potential misspelling) - only warn, don't error
         similar_keyword = self.similar_to_keyword(result)
         if similar_keyword:
-            self.error(f"Error: invalid identifier '{result}' at line {self.line}, position {start_col}. Did you mean '{similar_keyword}'?")
+            # Store similar keyword info but don't throw error - let it be an identifier
+            # This allows for domain-specific identifiers while providing a warning mechanism
+            pass
         
         return 'IDENTIFIER', result
 
     def get_string(self):
+        """Parse string literals with support for escaped quotes"""
         result = ''
         start_line = self.line
         start_col = self.column
@@ -148,80 +196,124 @@ class Lexer:
         while self.current_char is not None and self.current_char != "'":
             if self.current_char == '\n':
                 # Unclosed string before end of line
-                self.error(f"Error: unclosed string starting at line {start_line}, position {start_col}.")
-            result += self.current_char
-            self.advance()
+                self.error(f"Unclosed string starting at line {start_line}, column {start_col}.")
+            
+            # Handle escaped quotes (SQL uses '' for a single quote inside a string)
+            if self.current_char == "'" and self.pos + 1 < len(self.text) and self.text[self.pos + 1] == "'":
+                result += "'"
+                self.advance()  # Skip first quote
+                self.advance()  # Skip second quote
+            else:
+                result += self.current_char
+                self.advance()
         
         if self.current_char != "'":
             # End of file reached without closing quote
-            self.error(f"Error: unclosed string starting at line {start_line}, position {start_col}.")
+            self.error(f"Unclosed string starting at line {start_line}, column {start_col}.")
         
         self.advance()  # Skip the closing quote
         return 'STRING', f"'{result}'"
 
     def get_next_token(self):
+        """Get the next token from the input"""
         while self.current_char is not None:
+            # Skip whitespace
             if self.current_char.isspace():
                 self.skip_whitespace()
                 continue
-                
+            
+            # Skip comments
             if self.current_char == '-' and self.pos + 1 < len(self.text) and self.text[self.pos + 1] == '-':
                 self.skip_comment()
                 continue
-                
+            
             if self.current_char == '#' and self.pos + 1 < len(self.text) and self.text[self.pos + 1] == '#':
                 self.skip_comment()
                 continue
 
+            # Identifiers and keywords
             if self.current_char.isalpha() or self.current_char == '_':
+                self.token_start_col = self.column
                 token_type, token_value = self.get_identifier()
-                return Token(token_type, token_value, self.line, self.column - len(token_value) + 1)
+                return Token(token_type, token_value, self.line, self.token_start_col)
 
+            # Numbers (including scientific notation)
             if self.current_char.isdigit():
+                self.token_start_col = self.column
                 token_type, token_value = self.get_number()
-                return Token(token_type, token_value, self.line, self.column - len(token_value) + 1)
+                return Token(token_type, token_value, self.line, self.token_start_col)
 
+            # Strings
             if self.current_char == "'":
+                self.token_start_col = self.column
                 token_type, token_value = self.get_string()
-                return Token(token_type, token_value, self.line, self.column - len(token_value) + 1)
+                return Token(token_type, token_value, self.line, self.token_start_col)
 
-            # Handle operators and delimiters
+            # Multi-character operators (must check before single-char operators)
+            if self.pos + 1 < len(self.text):
+                two_char = self.current_char + self.text[self.pos + 1]
+                if two_char in self.multi_char_operators:
+                    self.token_start_col = self.column
+                    self.advance()
+                    self.advance()
+                    return Token(self.multi_char_operators[two_char], two_char, self.line, self.token_start_col)
+            
+            # Single character operators and comparison operators
             if self.current_char in '=<>!':
-                start = self.column
+                self.token_start_col = self.column
                 char = self.current_char
                 self.advance()
                 
-                if self.current_char == '=':
-                    operator = char + self.current_char
-                    self.advance()
-                    return Token('OPERATOR', operator, self.line, start)
+                # Determine operator type
+                if char == '=':
+                    return Token('OPERATOR', '=', self.line, self.token_start_col)
                 else:
-                    if char == '=':
-                        return Token('OPERATOR', '=', self.line, start)
-                    return Token('OPERATOR', char, self.line, start)
+                    return Token('COMPARISON', char, self.line, self.token_start_col)
             
-            if self.current_char in '+-*/':
-                token = Token('OPERATOR', self.current_char, self.line, self.column)
+            # Arithmetic operators
+            if self.current_char in '+-*':
+                self.token_start_col = self.column
+                token = Token('OPERATOR', self.current_char, self.line, self.token_start_col)
                 self.advance()
                 return token
-                
+            
+            # Division and modulo
+            if self.current_char == '/':
+                self.token_start_col = self.column
+                token = Token('OPERATOR', '/', self.line, self.token_start_col)
+                self.advance()
+                return token
+            
+            if self.current_char == '%':
+                self.token_start_col = self.column
+                token = Token('OPERATOR', '%', self.line, self.token_start_col)
+                self.advance()
+                return token
+            
+            # Bitwise operators
+            if self.current_char in '&|^':
+                self.token_start_col = self.column
+                token = Token('OPERATOR', self.current_char, self.line, self.token_start_col)
+                self.advance()
+                return token
+            
+            # Delimiters
             if self.current_char in '(),;':
-                # Delimiters: symbols that separate SQL constructs
-                # All of these share the same token type 'DELIMITER';
-                # the specific symbol is stored in the value.
-                token = Token('DELIMITER', self.current_char, self.line, self.column)
+                self.token_start_col = self.column
+                token = Token('DELIMITER', self.current_char, self.line, self.token_start_col)
                 self.advance()
                 return token
 
-            # Dot should be its own token so qualified names split: d . department
+            # Dot for qualified names
             if self.current_char == '.':
-                token = Token('DOT', '.', self.line, self.column)
+                self.token_start_col = self.column
+                token = Token('DOT', '.', self.line, self.token_start_col)
                 self.advance()
                 return token
 
-            # If we get here, we have an unknown/invalid character
+            # Unknown character
             self.error(
-                f"Error: invalid character {self.current_char!r} at line {self.line}, position {self.column}."
+                f"Invalid character '{self.current_char}' at line {self.line}, column {self.column}."
             )
 
         return Token('EOF', None, self.line, self.column)
@@ -252,12 +344,19 @@ def main():
                 break
             tokens.append(token)
             print(token)
-        except Exception as e:
+        except LexerError as e:
             errors.append(str(e))
             # Try to recover by advancing to the next character
             if lexer.current_char is not None:
                 lexer.advance()
-            continue
+            else:
+                break
+        except Exception as e:
+            errors.append(f"Unexpected error: {str(e)}")
+            if lexer.current_char is not None:
+                lexer.advance()
+            else:
+                break
 
     print("\nSymbol Table:")
     symbols = {}

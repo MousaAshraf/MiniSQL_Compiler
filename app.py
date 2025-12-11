@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from lexer import Lexer, Token
+from lexer import Lexer, LexerError, Token
 
 st.title("Phase 1 SQL Lexer")
 
@@ -22,8 +22,14 @@ if uploaded_file is not None:
             if token.type == 'EOF':
                 break
             tokens.append(token)
-        except Exception as e:
+        except LexerError as e:
             errors.append(str(e))
+            if lexer.current_char is not None:
+                lexer.advance()
+            else:
+                break
+        except Exception as e:
+            errors.append(f"Unexpected error: {str(e)}")
             if lexer.current_char is not None:
                 lexer.advance()
             else:
@@ -49,4 +55,4 @@ if uploaded_file is not None:
         for error in errors:
             st.error(error)
     else:
-        st.success("No errors found")
+        st.success("No errors found!")
