@@ -976,7 +976,7 @@ class Parser:
         return self.parse_primary_condition()
     
     def parse_primary_condition(self) -> ParseTreeNode:
-        """Parse primary condition (comparison, BETWEEN, IN, LIKE, IS NULL)"""
+        """Parse primary condition (comparison, BETWEEN, IN, LIKE, IS NULL, or bare expression for boolean columns)"""
         # Handle parenthesized condition
         if self.match_type('DELIMITER') and self.current_token.value == '(':
             self.advance()
@@ -999,8 +999,8 @@ class Parser:
         elif self.match_type('COMPARISON', 'OPERATOR'):
             return self.parse_comparison(left_expr)
         else:
-            self.error(f"Expected comparison operator but found '{self.current_token.value}'")
-            raise ParseError("Expected comparison operator")
+            # Allow bare expressions (e.g., boolean columns like "Active" or "NOT Active")
+            return left_expr
     
     def parse_comparison(self, left_expr: ParseTreeNode) -> ParseTreeNode:
         """Parse comparison operation"""
