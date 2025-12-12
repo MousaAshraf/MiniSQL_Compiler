@@ -60,9 +60,9 @@ if uploaded_file is not None:
         
         # Display tokens table
         st.subheader("Tokens")
-        if tokens and tokens[-1].type != 'EOF':
+        if tokens and len(tokens) > 1:  # More than just EOF token
             token_data = {
-                'Token Type': [token.type for token in tokens[:-1]],
+                'Token Type': [token.type for token in tokens[:-1]],  # Exclude EOF
                 'Lexeme': [token.value for token in tokens[:-1]],
                 'Line': [token.line for token in tokens[:-1]],
                 'Column': [token.column for token in tokens[:-1]]
