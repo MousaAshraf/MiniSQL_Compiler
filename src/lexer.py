@@ -32,7 +32,7 @@ class Lexer:
             'CASE', 'CHECK', 'COLUMN', 'CREATE', 'DATABASE', 'DEFAULT',
             'DELETE', 'DESC', 'DISTINCT', 'DROP', 'ELSE', 'EXISTS', 'FOREIGN',
             'FROM', 'FULL', 'GROUP', 'HAVING', 'IN', 'INDEX', 'INNER',
-            'INSERT', 'INTERSECT', 'INTO', 'IS', 'JOIN', 'LEFT', 'LIKE',
+            'INSERT', 'INTERSECT', 'INTO', 'IS', 'JOIN', 'KEY', 'LEFT', 'LIKE',
             'LIMIT', 'NOT', 'NULL', 'ON', 'OR', 'ORDER', 'OUTER', 'PRIMARY',
             'REFERENCES', 'RIGHT', 'ROWNUM', 'SELECT', 'SET', 'TABLE', 'TOP',
             'UNION', 'UNIQUE', 'UPDATE', 'VALUES', 'VIEW', 'WHERE',

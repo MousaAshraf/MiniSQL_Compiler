@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from lexer import Lexer, LexerError, Token
 from parser import parse_sql, ParseError
+from semantic import SemanticAnalyzer
 
 
 def count_nodes(node):
@@ -16,7 +17,7 @@ st.set_page_config(page_title="SQL Compiler - Phases 1 & 2", layout="wide")
 st.title("SQL Compiler - Lexical Analyzer & Syntax Analyzer")
 
 # Tabs for different phases
-tab1, tab2, tab3 = st.tabs(["Input & Tokens", "Parse Tree", "Analysis Summary"])
+tab1, tab2, tab3, tab4 = st.tabs(["Input & Tokens", "Parse Tree", "Semantic Analysis", "Analysis Summary"])
 
 uploaded_file = st.file_uploader("Upload SQL File", type=['sql'])
 
@@ -53,6 +54,15 @@ if uploaded_file is not None:
     
     # ==================== PHASE 2: SYNTAX ANALYSIS ====================
     parse_tree, lex_errors, parser_errors = parse_sql(text)
+
+    # ==================== PHASE 3: SEMANTIC ANALYSIS ====================
+    semantic_success = False
+    semantic_errors = []
+    symbol_table = None
+    
+    if parse_tree and not parser_errors:
+        analyzer = SemanticAnalyzer()
+        semantic_success, semantic_errors, symbol_table = analyzer.analyze(parse_tree)
     
     # ==================== TAB 1: TOKENS ====================
     with tab1:
@@ -112,6 +122,10 @@ if uploaded_file is not None:
                         label = f"{node.node_type.value}: '{node.value}'"
                     else:
                         label = node.node_type.value
+                    
+                    # Add semantic annotation
+                    if hasattr(node, "inferred_type") and node.inferred_type:
+                        label += f" <Type: {node.inferred_type}>"
                     
                     # Add location info
                     location = ""
@@ -197,8 +211,39 @@ if uploaded_file is not None:
         else:
             st.error("Failed to generate parse tree due to critical parsing errors.")
     
-    # ==================== TAB 3: ANALYSIS SUMMARY ====================
+    # ==================== TAB 3: SEMANTIC ANALYSIS ====================
     with tab3:
+        st.subheader("Semantic Analysis Results")
+        
+        if not parse_tree or parser_errors:
+             st.info("Fix syntax errors to proceed to semantic analysis.")
+        else:
+            if semantic_success:
+                st.success("✓ Semantic Analysis Successful. Query is logically valid.")
+                
+                # Symbol Table Dump
+                if symbol_table and symbol_table.tables:
+                    st.subheader("Symbol Table")
+                    for table_name, info in symbol_table.tables.items():
+                        with st.expander(f"Table: {table_name}", expanded=True):
+                            cols_data = []
+                            for col_name, col_info in info.columns.items():
+                                cols_data.append({
+                                    "Column": col_name,
+                                    "Type": col_info.data_type,
+                                    "Constraints": ", ".join(col_info.constraints)
+                                })
+                            st.table(pd.DataFrame(cols_data))
+                else:
+                    st.info("Symbol Table is empty (no tables created).")
+
+            else:
+                st.error(f"Found {len(semantic_errors)} semantic error(s):")
+                for err in semantic_errors:
+                    st.error(err)
+
+    # ==================== TAB 4: ANALYSIS SUMMARY ====================
+    with tab4:
         st.subheader("Compilation Summary")
         
         col1, col2, col3 = st.columns(3)
@@ -213,7 +258,12 @@ if uploaded_file is not None:
                 st.metric("Parse Tree Nodes", count_nodes(parse_tree))
         
         with col3:
-            status = "✓ Success" if not lexer_errors and not parser_errors else "✗ Failed"
+            if lexer_errors or parser_errors:
+                status = "✗ Failed (Syntax/Lexical)"
+            elif semantic_errors:
+                status = "✗ Failed (Semantic)"
+            else:
+                status = "✓ Success"
             st.metric("Compilation Status", status)
         
         # Token Statistics

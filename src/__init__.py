@@ -8,6 +8,7 @@ __author__ = "Omar"
 
 from .lexer import Lexer, LexerError, Token
 from .parser import Parser, parse_sql, ParseTreeNode, NodeType, SyntaxErrorInfo, ParseError
+from .semantic import SemanticAnalyzer, SymbolTable
 
 __all__ = [
     # Lexer exports
@@ -22,6 +23,8 @@ __all__ = [
     'NodeType',
     'SyntaxErrorInfo',
     'ParseError',
-]
 
-__all__ = ['Lexer', 'LexerError', 'Token']
+    # Semantic exports
+    'SemanticAnalyzer',
+    'SymbolTable',
+]
