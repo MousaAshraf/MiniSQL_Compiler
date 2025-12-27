@@ -1,4 +1,4 @@
-# 📊 **MiniSQL Compiler – Phase 01, 02 & 03**  
+# 📊 **MiniSQL Compiler **  
 *A Complete SQL Compiler Implementation with Lexical, Syntax, and Semantic Analysis*
 
 ---
