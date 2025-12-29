@@ -1,3 +1,11 @@
+# """
+# MiniSQL Compiler - Phase 01
+# Lexical Analyzer (Phase 01) for SQL-like language
+# """
+
+# __version__ = "2.0.0"
+# __author__ = "Omar"
+
 import difflib
 from constants import SQL_KEYWORDS
 
@@ -86,6 +94,17 @@ class Lexer:
 
     def skip_comments(self):
         """Skip single line comments (--) and multi-line comments (##)"""
+        # Single-line comments: -- ... until end of line
+        if self.current_char == '-' and self.pos + 1 < len(self.text) and self.text[self.pos + 1] == '-':
+            self.advance()  # Skip first -
+            self.advance()  # Skip second -
+            # Skip until newline or EOF
+            while self.current_char is not None and self.current_char != '\n':
+                self.advance()
+            if self.current_char == '\n':
+                self.advance()  # Skip the newline to position after comment
+            return  # Done with this comment
+
         # Multi-line comments ## ... ##
         if self.current_char == '#' and self.pos + 1 < len(self.text) and self.text[self.pos + 1] == '#':
             start_line = self.line
@@ -205,12 +224,9 @@ class Lexer:
                 self.skip_whitespace()
                 continue
             
-            # Skip comments
-            if self.current_char == '-' and self.pos + 1 < len(self.text) and self.text[self.pos + 1] == '-':
-                self.skip_comments()
-                continue
-            
-            if self.current_char == '#' and self.pos + 1 < len(self.text) and self.text[self.pos + 1] == '#':
+            # Skip comments (handles both -- and ## now)
+            if (self.current_char == '-' and self.pos + 1 < len(self.text) and self.text[self.pos + 1] == '-') or \
+               (self.current_char == '#' and self.pos + 1 < len(self.text) and self.text[self.pos + 1] == '#'):
                 self.skip_comments()
                 continue
 
